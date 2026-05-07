@@ -10,7 +10,7 @@ set -euo pipefail
 
 # ---- 全局配置 (按需修改) ----
 ROOT_PASSWORD="${ROOT_PASSWORD:-root}"       # 可通过环境变量覆盖: ROOT_PASSWORD=xxx bash init.sh
-NODE_MAJOR="${NODE_MAJOR:-22}"               # Node.js 主版本号
+NODE_MAJOR="${NODE_MAJOR:-24}"               # Node.js 主版本号
 CONDA_DIR="/opt/miniconda3"
 TIMEZONE="Asia/Shanghai"
 
@@ -85,7 +85,7 @@ echo -e "\n>>> [3/$TOTAL_STEPS] 安装 Docker 环境..."
 if ! command -v docker &> /dev/null; then
     # GPG 密钥
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    curl -fsSL --connect-timeout 10 --max-time 30 https://download.docker.com/linux/ubuntu/gpg \
         -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
 
@@ -138,25 +138,34 @@ step_ok 3 "Docker 环境"
 # ==========================================
 echo -e "\n>>> [4/$TOTAL_STEPS] 安装 Node.js 生态..."
 
+# 4a. Node.js
 if ! command -v node &> /dev/null; then
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh
     bash /tmp/nodesource_setup.sh
     rm -f /tmp/nodesource_setup.sh
-
     apt-get install -y nodejs
+    echo " -> Node.js $(node -v) 安装完成"
+else
+    echo " -> Node.js $(node -v) 已安装，跳过"
+fi
 
-    # pnpm via corepack
+# 4b. pnpm (via corepack)
+if ! command -v pnpm &> /dev/null; then
     corepack enable
     corepack prepare pnpm@latest --activate
+    echo " -> pnpm $(pnpm -v) 安装完成"
+else
+    echo " -> pnpm $(pnpm -v) 已安装，跳过"
+fi
 
-    # PM2
+# 4c. PM2
+if ! command -v pm2 &> /dev/null; then
     npm install -g pm2
     env PATH="$PATH:/usr/bin" pm2 startup systemd -u root --hp /root
     pm2 save
-
-    echo " -> Node.js $(node -v), pnpm $(pnpm -v), PM2 $(pm2 -v) 安装完成"
+    echo " -> PM2 $(pm2 -v) 安装完成"
 else
-    echo " -> Node.js $(node -v) 已安装，跳过"
+    echo " -> PM2 $(pm2 -v) 已安装，跳过"
 fi
 
 step_ok 4 "Node.js 生态"

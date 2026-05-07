@@ -29,7 +29,7 @@
     - 安装最新版 Docker Engine 及 Docker Compose 插件。
     - 配置 Docker 日志滚动限制（防止日志占满磁盘）。
 4.  **Node.js 生态**:
-    - 安装 Node.js (默认 v22)。
+    - 安装 Node.js (默认 v24)。
     - 启用 `pnpm`。
     - 安装并配置 `PM2` 进程管理器（并设置开机自启）。
 5.  **Python 环境 (Miniconda)**:
@@ -92,7 +92,7 @@ The script automatically completes initialization in five stages:
     - Installs the latest Docker Engine and Docker Compose plugin.
     - Configures Docker log rotation (prevents logs from filling up the disk).
 4.  **Node.js Ecosystem**:
-    - Installs Node.js (default v22).
+    - Installs Node.js (default v24).
     - Enables `pnpm`.
     - Installs and configures `PM2` process manager (with auto-start).
 5.  **Python Environment (Miniconda)**:
