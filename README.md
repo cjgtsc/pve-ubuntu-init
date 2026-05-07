@@ -40,9 +40,9 @@
 
 #### 1. 下载脚本
 ```bash
-wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/ubuntu_init.sh
+wget https://raw.githubusercontent.com/cjgtsc/pve-ubuntu-init/main/ubuntu_init.sh
 # 或者
-curl -O https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/ubuntu_init.sh
+curl -O https://raw.githubusercontent.com/cjgtsc/pve-ubuntu-init/main/ubuntu_init.sh
 ```
 
 #### 2. 赋予执行权限
@@ -103,9 +103,9 @@ The script automatically completes initialization in five stages:
 
 #### 1. Download Script
 ```bash
-wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/ubuntu_init.sh
+wget https://raw.githubusercontent.com/cjgtsc/pve-ubuntu-init/main/ubuntu_init.sh
 # or
-curl -O https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/ubuntu_init.sh
+curl -O https://raw.githubusercontent.com/cjgtsc/pve-ubuntu-init/main/ubuntu_init.sh
 ```
 
 #### 2. Grant Execution Permission
