@@ -51,13 +51,22 @@ chmod +x ubuntu_init.sh
 ```
 
 #### 3. 执行脚本
-脚本会自动检测并申请 `root` 权限。
-```bash
-./ubuntu_init.sh
-```
+脚本支持以下三种运行方式，会自动检测并申请 `root` 权限：
 
-*提示：你可以通过环境变量修改默认配置，例如：*
-`ROOT_PASSWORD=my_secure_password NODE_MAJOR=22 ./ubuntu_init.sh`
+- **方式 A：Root 用户直接运行**
+  ```bash
+  ./ubuntu_init.sh
+  ```
+- **方式 B：普通用户运行（自动 sudo 提权）**
+  ```bash
+  ./ubuntu_init.sh
+  ```
+- **方式 C：自定义参数运行（推荐）**
+  ```bash
+  ROOT_PASSWORD=mypass NODE_MAJOR=24 ./ubuntu_init.sh
+  ```
+
+*提示：`exec sudo` 逻辑确保了环境变量能正确传递，且不会产生多层嵌套进程。*
 
 ### 完成后建议
 1. 执行 `source ~/.bashrc` 或重新连接 SSH 以激活 Conda 和 Node.js 环境。
@@ -114,13 +123,22 @@ chmod +x ubuntu_init.sh
 ```
 
 #### 3. Run Script
-The script will automatically detect and request `root` privileges.
-```bash
-./ubuntu_init.sh
-```
+The script supports the following three ways to run, and will automatically detect and request `root` privileges:
 
-*Tip: You can modify default configs via environment variables, e.g.:*
-`ROOT_PASSWORD=my_secure_password NODE_MAJOR=22 ./ubuntu_init.sh`
+- **Method A: Run directly as Root**
+  ```bash
+  ./ubuntu_init.sh
+  ```
+- **Method B: Run as normal user (Automatic sudo elevation)**
+  ```bash
+  ./ubuntu_init.sh
+  ```
+- **Method C: Run with custom parameters (Recommended)**
+  ```bash
+  ROOT_PASSWORD=mypass NODE_MAJOR=24 ./ubuntu_init.sh
+  ```
+
+*Tip: The `exec sudo` logic ensures that environment variables are passed correctly and does not create nested processes.*
 
 ### After Completion
 1. Run `source ~/.bashrc` or reconnect via SSH to activate Conda and Node.js environments.
