@@ -151,12 +151,17 @@ fi
 
 # 4b. pnpm (via corepack)
 if ! command -v pnpm &> /dev/null; then
-    # NodeSource 新版不再自带 corepack，需手动安装
-    if ! command -v corepack &> /dev/null; then
+    # Node 24 自带 corepack；若缺失则手动安装并用绝对路径调用
+    if command -v corepack &> /dev/null; then
+        COREPACK="corepack"
+    else
         npm install -g corepack
+        hash -r
+        COREPACK="$(npm prefix -g)/bin/corepack"
     fi
-    corepack enable
-    corepack prepare pnpm@latest --activate
+    "$COREPACK" enable
+    "$COREPACK" prepare pnpm@latest --activate
+    hash -r
     echo " -> pnpm $(pnpm -v) 安装完成"
 else
     echo " -> pnpm $(pnpm -v) 已安装，跳过"
