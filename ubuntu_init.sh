@@ -126,9 +126,9 @@ EOF
 DAEMON
     systemctl restart docker
 
-    echo " -> Docker $(docker --version | awk '{print $3}') 安装完成"
+    echo " -> Docker $(docker --version | awk '{gsub(/,/,""); print $3}') 安装完成"
 else
-    echo " -> Docker 已安装 ($(docker --version | awk '{print $3}'))，跳过"
+    echo " -> Docker 已安装 ($(docker --version | awk '{gsub(/,/,""); print $3}'))，跳过"
 fi
 
 step_ok 3 "Docker 环境"
@@ -193,7 +193,7 @@ echo "=========================================="
 echo " 🎉 初始化全部完成！"
 echo "=========================================="
 echo " 时区:       $(timedatectl show -p Timezone --value)"
-echo " Docker:     $(docker --version 2>/dev/null | awk '{print $3}' || echo '未安装')"
+echo " Docker:     $(docker --version 2>/dev/null | awk '{gsub(/,/,""); print $3}' || echo '未安装')"
 echo " Node.js:    $(node -v 2>/dev/null || echo '未安装')"
 echo " pnpm:       $(pnpm -v 2>/dev/null || echo '未安装')"
 echo " PM2:        $(pm2 -v 2>/dev/null || echo '未安装')"
