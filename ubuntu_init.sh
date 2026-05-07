@@ -151,6 +151,10 @@ fi
 
 # 4b. pnpm (via corepack)
 if ! command -v pnpm &> /dev/null; then
+    # NodeSource 新版不再自带 corepack，需手动安装
+    if ! command -v corepack &> /dev/null; then
+        npm install -g corepack
+    fi
     corepack enable
     corepack prepare pnpm@latest --activate
     echo " -> pnpm $(pnpm -v) 安装完成"
