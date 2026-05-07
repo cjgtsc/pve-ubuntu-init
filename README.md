@@ -51,13 +51,13 @@ chmod +x ubuntu_init.sh
 ```
 
 #### 3. 执行脚本
-**注意**: 必须以 `root` 用户身份运行。
+脚本会自动检测并申请 `root` 权限。
 ```bash
 ./ubuntu_init.sh
 ```
 
 *提示：你可以通过环境变量修改默认配置，例如：*
-`ROOT_PASSWORD=my_secure_password NODE_MAJOR=20 ./ubuntu_init.sh`
+`ROOT_PASSWORD=my_secure_password NODE_MAJOR=22 ./ubuntu_init.sh`
 
 ### 完成后建议
 1. 执行 `source ~/.bashrc` 或重新连接 SSH 以激活 Conda 和 Node.js 环境。
@@ -114,13 +114,13 @@ chmod +x ubuntu_init.sh
 ```
 
 #### 3. Run Script
-**Note**: Must be run as `root`.
+The script will automatically detect and request `root` privileges.
 ```bash
 ./ubuntu_init.sh
 ```
 
 *Tip: You can modify default configs via environment variables, e.g.:*
-`ROOT_PASSWORD=my_secure_password NODE_MAJOR=20 ./ubuntu_init.sh`
+`ROOT_PASSWORD=my_secure_password NODE_MAJOR=22 ./ubuntu_init.sh`
 
 ### After Completion
 1. Run `source ~/.bashrc` or reconnect via SSH to activate Conda and Node.js environments.

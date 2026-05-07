@@ -8,18 +8,25 @@
 
 set -euo pipefail
 
+# ---- 自动提权: 非 root 用户自动通过 sudo 重新执行 ----
+if [[ $EUID -ne 0 ]]; then
+    echo "当前用户非 root，正在通过 sudo 提权..."
+    # 传递环境变量给 sudo 下的脚本
+    exec sudo ROOT_PASSWORD="${ROOT_PASSWORD:-root}" \
+              NODE_MAJOR="${NODE_MAJOR:-24}" \
+              bash "$0" "$@"
+fi
+
 # ---- 全局配置 (按需修改) ----
 ROOT_PASSWORD="${ROOT_PASSWORD:-root}"       # 可通过环境变量覆盖: ROOT_PASSWORD=xxx bash init.sh
 NODE_MAJOR="${NODE_MAJOR:-24}"               # Node.js 主版本号
 CONDA_DIR="/opt/miniconda3"
 TIMEZONE="Asia/Shanghai"
 
-# ---- 日志 & 基本检查 ----
+# ---- 日志 ----
 LOG_FILE="/var/log/ubuntu-init-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "日志文件: $LOG_FILE"
-
-[[ $EUID -ne 0 ]] && { echo "错误: 请以 root 用户运行此脚本"; exit 1; }
 
 # 防止 apt 交互式弹窗 (GRUB、内核升级提示等)
 export DEBIAN_FRONTEND=noninteractive
