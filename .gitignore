@@ -26,3 +26,4 @@ ENV/
 .tmp/
 .vscode/
 .idea/
+.claude/
