@@ -9,7 +9,7 @@ set -euo pipefail
 
 # ---- 自动提权: 非 root 用户自动通过 sudo 重新执行 ----
 if [[ $EUID -ne 0 ]]; then
-    echo "当前用户非 root，正在通过 sudo 提权..."
+    echo "Not root. Re-running with sudo..."
     exec sudo env NODE_MAJOR="${NODE_MAJOR:-24}" \
               ENABLE_UFW="${ENABLE_UFW:-}" \
               ENABLE_FAIL2BAN="${ENABLE_FAIL2BAN:-}" \
@@ -40,14 +40,42 @@ LOGIN_GRACE_TIME="${LOGIN_GRACE_TIME:-120}"       # SSH 认证超时秒数 (跨�
 SKIP_SELECT="${SKIP_SELECT:-false}"               # true 时跳过交互菜单，使用默认/环境变量
 
 # ==========================================
-# 交互式功能选择
+# Interactive component selection (whiptail)
+# English UI (PVE console safe) + NEWT theme
+# Target look: bg #262626 / accent #e95420
+# (newt only supports named colors; mapped to black/red)
 # ==========================================
 
-# 判断是否应弹出交互式安装菜单
+# Approximate #262626 (black) + #e95420 (red) for whiptail/newt
+apply_newt_theme() {
+    export NEWT_COLORS='
+root=white,black
+border=red,black
+window=white,black
+shadow=black,black
+title=white,red
+button=black,red
+actbutton=white,red
+compactbutton=white,black
+checkbox=white,black
+actcheckbox=white,red
+entry=white,black
+label=white,black
+listbox=white,black
+actlistbox=white,red
+sellistbox=black,white
+actsellistbox=white,red
+textbox=white,black
+roottext=red,black
+emptyscale=,black
+disabledentry=black,black
+'
+}
+
+# Decide whether to show the interactive menu
 should_show_select_menu() {
     [[ "$SKIP_SELECT" == "true" ]] && return 1
     [[ ! -t 0 ]] && return 1
-    # 六项均已通过环境变量明确指定时，不再弹菜单
     if [[ -n "$ENABLE_UFW" && -n "$ENABLE_FAIL2BAN" && -n "$ENABLE_AUTO_UPDATES" \
        && -n "$ENABLE_DOCKER" && -n "$ENABLE_NODE" && -n "$ENABLE_MINICONDA" ]]; then
         return 1
@@ -55,7 +83,7 @@ should_show_select_menu() {
     return 0
 }
 
-# 将布尔字符串规范为 true/false；空值回落默认
+# Normalize a bool string to true/false; empty falls back to default
 normalize_bool() {
     local value="${1:-}"
     local defaultValue="${2:-true}"
@@ -68,19 +96,91 @@ normalize_bool() {
     fi
 }
 
-# 用 whiptail/dialog 展示复选框；失败则返回非 0
+# Return English help text for server components
+get_install_help_text() {
+    cat <<EOF
+REQUIRED (always installed, cannot disable)
+
+1. System Base Setup
+   - Root password: keep existing; if locked and ROOT_PASSWORD
+     is unset, prompt interactively to set one
+   - Timezone: Asia/Shanghai
+   - Locales: en_US.UTF-8 / zh_CN.UTF-8
+   - SSH: default port 8022, allow Root login, limit auth tries
+     (briefly listens on 22 during transition)
+
+2. System Update & Base Packages
+   - apt update / upgrade
+   - Tools: curl wget git jq unzip htop build-essential ...
+
+OPTIONAL (next screen: Up/Down move, Space toggle, Enter confirm)
+
+3. UFW Firewall
+   - Deny inbound by default; allow SSH / 80 / 443
+
+4. Fail2ban
+   - SSH brute-force shield: 5 fails / 10 min -> ban 1 hour
+
+5. Automatic Security Updates
+   - unattended-upgrades: install security patches daily
+
+6. Docker
+   - Official Docker Engine + Compose plugin
+   - Log rotation (20MB x 3 files)
+
+7. Node.js Ecosystem
+   - Node.js (default v${NODE_MAJOR})
+   - pnpm + PM2 with systemd startup
+
+8. Miniconda
+   - Install to /opt/miniconda3
+   - Init bash; disable auto-activate base
+EOF
+}
+
+# Show English help via whiptail/dialog, or plain text
+show_install_help() {
+    local helpText
+    helpText=$(get_install_help_text)
+    apply_newt_theme
+
+    if command -v whiptail &>/dev/null; then
+        whiptail --title "Ubuntu Server Init - Component Guide" \
+            --scrolltext "$helpText" 28 78 2>/dev/null \
+            || whiptail --title "Ubuntu Server Init - Component Guide" \
+                --msgbox "$helpText" 28 78 \
+            || true
+    elif command -v dialog &>/dev/null; then
+        dialog --title "Ubuntu Server Init - Component Guide" --msgbox "$helpText" 28 78 || true
+        clear
+    else
+        echo ""
+        echo "$helpText"
+        echo ""
+        read -r -p "Press Enter to continue..." _
+    fi
+}
+
+# whiptail/dialog checklist; returns selected tags in SELECTED_TAGS
 show_checklist_tui() {
     local title="$1"
     local text="$2"
-    shift 2
+    local height="$3"
+    local width="$4"
+    local listHeight="$5"
+    shift 5
     local checklistArgs=("$@")
     local result=""
 
+    apply_newt_theme
+
     if command -v whiptail &>/dev/null; then
-        result=$(whiptail --title "$title" --checklist "$text" 20 70 8 \
+        result=$(whiptail --title "$title" --checklist "$text" \
+            "$height" "$width" "$listHeight" \
             "${checklistArgs[@]}" 3>&1 1>&2 2>&3) || return 1
     elif command -v dialog &>/dev/null; then
-        result=$(dialog --stdout --title "$title" --checklist "$text" 20 70 8 \
+        result=$(dialog --stdout --title "$title" --checklist "$text" \
+            "$height" "$width" "$listHeight" \
             "${checklistArgs[@]}") || return 1
         clear
     else
@@ -91,9 +191,9 @@ show_checklist_tui() {
     return 0
 }
 
-# 逐项 y/n 回退选择（无 TUI 工具时使用）
+# Plain y/n fallback when whiptail/dialog is unavailable
 prompt_yn_options() {
-    local ufwDefault f2bDefault autoDefault dockerDefault nodeDefault condaDefault
+    local ufwDefault f2bDefault autoDefault dockerDefault nodeDefault condaDefault answer
     ufwDefault=$(normalize_bool "$ENABLE_UFW" true)
     f2bDefault=$(normalize_bool "$ENABLE_FAIL2BAN" true)
     autoDefault=$(normalize_bool "$ENABLE_AUTO_UPDATES" true)
@@ -103,30 +203,33 @@ prompt_yn_options() {
 
     echo ""
     echo "=========================================="
-    echo " 请选择要安装的组件 (直接回车保持默认)"
+    echo " Ubuntu Server Init - Select Components"
     echo "=========================================="
+    get_install_help_text
+    echo "------------------------------------------"
+    echo " Optional (Enter keeps default)"
+    echo ""
 
-    local answer
-    read -r -p "  [1] UFW 防火墙           [默认: ${ufwDefault}] (y/n): " answer
+    read -r -p " Enable UFW firewall?              [default: ${ufwDefault}] (y/n): " answer
     ENABLE_UFW=$(normalize_bool "${answer:-$ufwDefault}" "$ufwDefault")
 
-    read -r -p "  [2] Fail2ban             [默认: ${f2bDefault}] (y/n): " answer
+    read -r -p " Enable Fail2ban?                  [default: ${f2bDefault}] (y/n): " answer
     ENABLE_FAIL2BAN=$(normalize_bool "${answer:-$f2bDefault}" "$f2bDefault")
 
-    read -r -p "  [3] 自动安全更新         [默认: ${autoDefault}] (y/n): " answer
+    read -r -p " Enable automatic security updates?[default: ${autoDefault}] (y/n): " answer
     ENABLE_AUTO_UPDATES=$(normalize_bool "${answer:-$autoDefault}" "$autoDefault")
 
-    read -r -p "  [4] Docker 环境          [默认: ${dockerDefault}] (y/n): " answer
+    read -r -p " Install Docker?                   [default: ${dockerDefault}] (y/n): " answer
     ENABLE_DOCKER=$(normalize_bool "${answer:-$dockerDefault}" "$dockerDefault")
 
-    read -r -p "  [5] Node.js 生态         [默认: ${nodeDefault}] (y/n): " answer
+    read -r -p " Install Node.js ecosystem?        [default: ${nodeDefault}] (y/n): " answer
     ENABLE_NODE=$(normalize_bool "${answer:-$nodeDefault}" "$nodeDefault")
 
-    read -r -p "  [6] Miniconda            [默认: ${condaDefault}] (y/n): " answer
+    read -r -p " Install Miniconda?                [default: ${condaDefault}] (y/n): " answer
     ENABLE_MINICONDA=$(normalize_bool "${answer:-$condaDefault}" "$condaDefault")
 }
 
-# 弹出安装选项复选框并写入 ENABLE_* 变量
+# Show help + checklist; write ENABLE_* variables
 select_install_options() {
     local ufwOn="OFF" f2bOn="OFF" autoOn="OFF" dockerOn="OFF" nodeOn="OFF" condaOn="OFF"
     [[ "$(normalize_bool "$ENABLE_UFW" true)" == "true" ]] && ufwOn="ON"
@@ -136,14 +239,23 @@ select_install_options() {
     [[ "$(normalize_bool "$ENABLE_NODE" true)" == "true" ]] && nodeOn="ON"
     [[ "$(normalize_bool "$ENABLE_MINICONDA" true)" == "true" ]] && condaOn="ON"
 
+    show_install_help
+
+    local menuText
+    menuText=$(cat <<'EOF'
+REQUIRED items always run (see previous screen).
+OPTIONAL: Up/Down to move, Space to toggle, Enter to confirm.
+EOF
+)
+
     SELECTED_TAGS=""
-    if show_checklist_tui "Ubuntu 服务器初始化" "空格勾选，回车确认（必装项会始终执行）" \
-        "ufw" "UFW 防火墙 (SSH/80/443)" "$ufwOn" \
-        "fail2ban" "Fail2ban (SSH 暴力破解防护)" "$f2bOn" \
-        "auto_updates" "自动安全更新 (unattended-upgrades)" "$autoOn" \
-        "docker" "Docker 环境 (Engine + Compose)" "$dockerOn" \
-        "node" "Node.js 生态 (Node + pnpm + PM2)" "$nodeOn" \
-        "miniconda" "Miniconda (Python 环境)" "$condaOn"; then
+    if show_checklist_tui "Ubuntu Server Init - Optional Components" "$menuText" 18 78 8 \
+        "ufw" "UFW: firewall, allow SSH/80/443" "$ufwOn" \
+        "fail2ban" "Fail2ban: SSH brute-force protection" "$f2bOn" \
+        "auto_updates" "Auto security updates (unattended-upgrades)" "$autoOn" \
+        "docker" "Docker: Engine + Compose + log rotation" "$dockerOn" \
+        "node" "Node.js: Node + pnpm + PM2 startup" "$nodeOn" \
+        "miniconda" "Miniconda: Python envs at /opt/miniconda3" "$condaOn"; then
 
         ENABLE_UFW="false"
         ENABLE_FAIL2BAN="false"
@@ -168,7 +280,7 @@ select_install_options() {
     fi
 }
 
-# 应用默认值或弹出交互菜单
+# Apply defaults or show interactive menu
 if should_show_select_menu; then
     select_install_options
 else
@@ -183,7 +295,7 @@ fi
 # ---- 日志 ----
 LOG_FILE="/var/log/ubuntu-server-init-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
-echo "日志文件: $LOG_FILE"
+echo "Log file: $LOG_FILE"
 
 # 防止 apt 交互式弹窗 (GRUB、内核升级提示等)
 export DEBIAN_FRONTEND=noninteractive
@@ -205,21 +317,21 @@ CURRENT_STEP=0
 # 输出当前步骤完成提示
 step_ok() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
-    echo -e "\n✅ [$CURRENT_STEP/$TOTAL_STEPS] $1 完成"
+    echo -e "\n[OK] [$CURRENT_STEP/$TOTAL_STEPS] $1 done"
 }
 
 echo ""
 echo "=========================================="
-echo " 本次安装选项"
+echo " Selected options"
 echo "=========================================="
-echo " 系统基础设置:     必装"
-echo " 系统更新与依赖:   必装"
-echo " UFW 防火墙:       $ENABLE_UFW"
-echo " Fail2ban:         $ENABLE_FAIL2BAN"
-echo " 自动安全更新:     $ENABLE_AUTO_UPDATES"
-echo " Docker:           $ENABLE_DOCKER"
-echo " Node.js 生态:     $ENABLE_NODE"
-echo " Miniconda:        $ENABLE_MINICONDA"
+echo " System base setup:     required"
+echo " System update & deps:  required"
+echo " UFW firewall:         $ENABLE_UFW"
+echo " Fail2ban:             $ENABLE_FAIL2BAN"
+echo " Auto security updates:$ENABLE_AUTO_UPDATES"
+echo " Docker:               $ENABLE_DOCKER"
+echo " Node.js ecosystem:    $ENABLE_NODE"
+echo " Miniconda:            $ENABLE_MINICONDA"
 echo "=========================================="
 
 # ---- 检测 SSH 运行模式 ----
@@ -246,7 +358,7 @@ restart_ssh() {
 # ==========================================
 # 1. 基础设置
 # ==========================================
-echo -e "\n>>> 配置系统基础设置..."
+echo -e "\n>>> Configuring system base setup..."
 
 # 1a. Root 密码
 #   优先级: 环境变量 > 交互输入 > 已有密码则跳过
@@ -258,28 +370,28 @@ fi
 if [[ -n "$ROOT_PASSWORD" ]]; then
     # 用户通过环境变量指定了密码
     echo "root:${ROOT_PASSWORD}" | chpasswd
-    echo " -> Root 密码已通过环境变量设置"
+    echo " -> Root password set from environment variable"
 elif $ROOT_LOCKED; then
     # Root 账户被锁定且未提供密码 → 交互式提示
     echo ""
-    echo " ⚠  检测到 Root 账户未设置密码 (已锁定)"
-    echo "    为确保 VNC/控制台可用，请设置 Root 密码:"
+    echo " [WARN] Root account has no password (locked)"
+    echo "    Set a Root password for VNC/console access:"
     echo ""
     while true; do
-        read -s -p "    输入 Root 密码: " pw1; echo
-        read -s -p "    确认 Root 密码: " pw2; echo
+        read -s -p "    Enter Root password: " pw1; echo
+        read -s -p "    Confirm Root password: " pw2; echo
         if [[ -z "$pw1" ]]; then
-            echo "    ✗ 密码不能为空，请重试"
+            echo "    [X] Password cannot be empty, try again"
         elif [[ "$pw1" != "$pw2" ]]; then
-            echo "    ✗ 两次输入不一致，请重试"
+            echo "    [X] Passwords do not match, try again"
         else
             echo "root:${pw1}" | chpasswd
-            echo " -> Root 密码已设置"
+            echo " -> Root password set"
             break
         fi
     done
 else
-    echo " -> Root 已有密码，跳过"
+    echo " -> Root password already set, skip"
 fi
 # 1b. 时区 & Locale
 timedatectl set-timezone "$TIMEZONE"
@@ -299,9 +411,9 @@ if $HAS_SSH_SOCKET; then
     # 若旧版脚本曾禁用 ssh.socket，重新启用
     if ! systemctl is-enabled ssh.socket &>/dev/null 2>&1; then
         systemctl enable ssh.socket &>/dev/null 2>&1 || true
-        echo " -> 重新启用 ssh.socket (可能被旧版脚本禁用)"
+        echo " -> Re-enabled ssh.socket (may have been disabled by older script)"
     fi
-    echo " -> 检测到 ssh.socket 模式 (Ubuntu 24.04+)，通过 systemd override 管理端口"
+    echo " -> Detected ssh.socket mode (Ubuntu 24.04+), managing port via systemd override"
 
     mkdir -p "$SOCKET_OVERRIDE_DIR"
     if [[ "$SSH_PORT" != "22" ]]; then
@@ -323,7 +435,7 @@ ListenStream=[::]:22"
         echo "$DESIRED_SOCKET" > "${SOCKET_OVERRIDE_DIR}/override.conf"
         SSH_CHANGED=true
         if [[ "$SSH_PORT" != "22" ]]; then
-            echo " -> ssh.socket 过渡配置: 同时监听 22 和 ${SSH_PORT}"
+            echo " -> ssh.socket transition: listening on 22 and ${SSH_PORT}"
         fi
     fi
 fi
@@ -332,14 +444,14 @@ fi
 # ssh.socket 模式下端口由 systemd 管理，sshd_config 不写 Port
 # 传统模式下端口由 sshd_config 管理
 if $HAS_SSH_SOCKET; then
-    DESIRED_SSH_CONFIG="# 服务器安全加固配置 (端口由 ssh.socket 管理)
+    DESIRED_SSH_CONFIG="# Server hardening (port managed by ssh.socket)
 PermitRootLogin yes
 PasswordAuthentication yes
 MaxAuthTries 5
 LoginGraceTime ${LOGIN_GRACE_TIME}"
 else
     if [[ "$SSH_PORT" != "22" ]]; then
-        DESIRED_SSH_CONFIG="# 服务器安全加固配置 (过渡期: 同时监听 22 和 ${SSH_PORT})
+        DESIRED_SSH_CONFIG="# Server hardening (transition: listen on 22 and ${SSH_PORT})
 Port 22
 Port ${SSH_PORT}
 PermitRootLogin yes
@@ -347,7 +459,7 @@ PasswordAuthentication yes
 MaxAuthTries 5
 LoginGraceTime ${LOGIN_GRACE_TIME}"
     else
-        DESIRED_SSH_CONFIG="# 服务器安全加固配置
+        DESIRED_SSH_CONFIG="# Server hardening
 Port 22
 PermitRootLogin yes
 PasswordAuthentication yes
@@ -363,17 +475,17 @@ fi
 
 if $SSH_CHANGED; then
     restart_ssh
-    echo " -> SSH 已加固 (允许 Root 登录)"
+    echo " -> SSH hardened (Root login allowed)"
 else
-    echo " -> SSH 配置未变更，跳过"
+    echo " -> SSH config unchanged, skip"
 fi
 
-step_ok "系统基础设置"
+step_ok "System base setup"
 
 # ==========================================
 # 2. 系统更新与基础依赖包
 # ==========================================
-echo -e "\n>>> 更新系统并安装基础依赖..."
+echo -e "\n>>> Updating system and installing base packages..."
 
 apt-get update -y
 apt-get upgrade -y \
@@ -386,13 +498,13 @@ apt-get install -y \
     build-essential ca-certificates \
     python3-pip software-properties-common
 
-step_ok "系统更新与基础依赖"
+step_ok "System update & base packages"
 
 # ==========================================
 # 3. 安全加固 (UFW + Fail2ban)
 # ==========================================
 if [[ "$ENABLE_UFW" == "true" || "$ENABLE_FAIL2BAN" == "true" ]]; then
-    echo -e "\n>>> 安全加固..."
+    echo -e "\n>>> Security hardening..."
 
     # 3a. UFW 防火墙 (幂等: 仅添加缺失规则，不重置已有配置)
     if [[ "$ENABLE_UFW" == "true" ]]; then
@@ -408,7 +520,7 @@ if [[ "$ENABLE_UFW" == "true" || "$ENABLE_FAIL2BAN" == "true" ]]; then
 
         # 放行 SSH — 过渡期保留 22 端口，防止断连
         if [[ "$SSH_PORT" != "22" ]]; then
-            ufw allow 22/tcp comment "SSH-legacy (脚本完成后自动关闭)" 2>/dev/null | grep -q "Skipping" || UFW_CHANGED=true
+            ufw allow 22/tcp comment "SSH-legacy (auto-close after script)" 2>/dev/null | grep -q "Skipping" || UFW_CHANGED=true
         fi
         ufw allow "${SSH_PORT}/tcp" comment "SSH" 2>/dev/null | grep -q "Skipping" || UFW_CHANGED=true
 
@@ -423,12 +535,12 @@ if [[ "$ENABLE_UFW" == "true" || "$ENABLE_FAIL2BAN" == "true" ]]; then
         fi
 
         if $UFW_CHANGED; then
-            echo " -> UFW 防火墙已配置 (放行: SSH:${SSH_PORT}, HTTP:80, HTTPS:443)"
+            echo " -> UFW configured (allow SSH:${SSH_PORT}, HTTP:80, HTTPS:443)"
         else
-            echo " -> UFW 防火墙已是期望状态，跳过"
+            echo " -> UFW already in desired state, skip"
         fi
     else
-        echo " -> UFW 防火墙跳过 (ENABLE_UFW=false)"
+        echo " -> UFW skipped (ENABLE_UFW=false)"
     fi
 
     # 3b. Fail2ban
@@ -445,7 +557,7 @@ if [[ "$ENABLE_UFW" == "true" || "$ENABLE_FAIL2BAN" == "true" ]]; then
         fi
 
         if [[ -f /etc/fail2ban/jail.local ]] && grep -q "port    = ${F2B_PORTS}" /etc/fail2ban/jail.local; then
-            echo " -> Fail2ban 已配置 (端口: ${F2B_PORTS})，跳过"
+            echo " -> Fail2ban already configured (ports: ${F2B_PORTS}), skip"
         else
             cat > /etc/fail2ban/jail.local <<EOF
 [DEFAULT]
@@ -462,22 +574,22 @@ EOF
 
             systemctl enable --now fail2ban
             systemctl restart fail2ban
-            echo " -> Fail2ban 已启用 (SSH 暴力破解防护: 端口 ${F2B_PORTS}, 5次失败封禁1小时)"
+            echo " -> Fail2ban enabled (SSH brute-force protection, ports: ${F2B_PORTS}, 5 fails -> ban 1h)"
         fi
     else
-        echo " -> Fail2ban 跳过 (ENABLE_FAIL2BAN=false)"
+        echo " -> Fail2ban skipped (ENABLE_FAIL2BAN=false)"
     fi
 
-    step_ok "安全加固"
+    step_ok "Security hardening"
 else
-    echo -e "\n>>> 安全加固跳过 (UFW/Fail2ban 均未启用)"
+    echo -e "\n>>> Security hardening skipped (UFW/Fail2ban both off)"
 fi
 
 # ==========================================
 # 4. 自动安全更新
 # ==========================================
 if [[ "$ENABLE_AUTO_UPDATES" == "true" ]]; then
-    echo -e "\n>>> 配置自动安全更新..."
+    echo -e "\n>>> Configuring automatic security updates..."
 
     apt-get install -y unattended-upgrades
     apt-get install -y apt-listchanges 2>/dev/null || true
@@ -488,23 +600,23 @@ APT::Periodic::AutocleanInterval "7";'
 
     if [[ -f /etc/apt/apt.conf.d/20auto-upgrades ]] && \
        [[ "$(cat /etc/apt/apt.conf.d/20auto-upgrades)" == "$DESIRED_AUTO_UPGRADES" ]]; then
-        echo " -> 自动安全更新已配置，跳过"
+        echo " -> Auto security updates already configured, skip"
     else
         echo "$DESIRED_AUTO_UPGRADES" > /etc/apt/apt.conf.d/20auto-upgrades
         systemctl enable --now unattended-upgrades
-        echo " -> 自动安全更新已配置 (每日检查安全补丁)"
+        echo " -> Auto security updates configured (daily security patches)"
     fi
 
-    step_ok "自动安全更新"
+    step_ok "Automatic security updates"
 else
-    echo -e "\n>>> 自动安全更新跳过 (ENABLE_AUTO_UPDATES=false)"
+    echo -e "\n>>> Auto security updates skipped (ENABLE_AUTO_UPDATES=false)"
 fi
 
 # ==========================================
 # 5. 安装 Docker & Docker Compose (官方 APT 源)
 # ==========================================
 if [[ "$ENABLE_DOCKER" == "true" ]]; then
-    echo -e "\n>>> 安装 Docker 环境..."
+    echo -e "\n>>> Installing Docker..."
 
     if ! command -v docker &> /dev/null; then
         # GPG 密钥
@@ -517,7 +629,7 @@ if [[ "$ENABLE_DOCKER" == "true" ]]; then
         CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
         if ! curl -fsSL --head --connect-timeout 10 --max-time 30 "https://download.docker.com/linux/ubuntu/dists/${CODENAME}/Release" &>/dev/null; then
             CODENAME="noble"   # 26.04 等新版本回退到 24.04 (noble)
-            echo " ⚠ Docker 暂不支持当前发行版，回退至 ${CODENAME}"
+            echo " [WARN] Docker unsupported on this release, fallback to ${CODENAME}"
         fi
 
         # deb822 格式源配置
@@ -550,21 +662,21 @@ EOF
 DAEMON
         systemctl restart docker
 
-        echo " -> Docker $(docker --version | awk '{gsub(/,/,""); print $3}') 安装完成"
+        echo " -> Docker $(docker --version | awk '{gsub(/,/,""); print $3}') installed"
     else
-        echo " -> Docker 已安装 ($(docker --version | awk '{gsub(/,/,""); print $3}'))，跳过"
+        echo " -> Docker already installed ($(docker --version | awk '{gsub(/,/,""); print $3}')), skip"
     fi
 
-    step_ok "Docker 环境"
+    step_ok "Docker"
 else
-    echo -e "\n>>> Docker 环境跳过 (ENABLE_DOCKER=false)"
+    echo -e "\n>>> Docker skipped (ENABLE_DOCKER=false)"
 fi
 
 # ==========================================
 # 6. 安装 Node.js (NodeSource), pnpm, pm2
 # ==========================================
 if [[ "$ENABLE_NODE" == "true" ]]; then
-    echo -e "\n>>> 安装 Node.js 生态..."
+    echo -e "\n>>> Installing Node.js ecosystem..."
 
     # 6a. Node.js
     if ! command -v node &> /dev/null; then
@@ -572,9 +684,9 @@ if [[ "$ENABLE_NODE" == "true" ]]; then
         bash /tmp/nodesource_setup.sh
         rm -f /tmp/nodesource_setup.sh
         apt-get install -y nodejs
-        echo " -> Node.js $(node -v) 安装完成"
+        echo " -> Node.js $(node -v) installed"
     else
-        echo " -> Node.js $(node -v) 已安装，跳过"
+        echo " -> Node.js $(node -v) already installed, skip"
     fi
 
     # 6b. pnpm (via corepack)
@@ -589,9 +701,9 @@ if [[ "$ENABLE_NODE" == "true" ]]; then
         "$COREPACK" enable
         "$COREPACK" prepare pnpm@latest --activate
         hash -r
-        echo " -> pnpm $(pnpm -v) 安装完成"
+        echo " -> pnpm $(pnpm -v) installed"
     else
-        echo " -> pnpm $(pnpm -v) 已安装，跳过"
+        echo " -> pnpm $(pnpm -v) already installed, skip"
     fi
 
     # 6c. PM2
@@ -599,21 +711,21 @@ if [[ "$ENABLE_NODE" == "true" ]]; then
         npm install -g pm2
         env PATH="$PATH:/usr/bin" pm2 startup systemd -u root --hp /root
         pm2 save
-        echo " -> PM2 $(pm2 -v) 安装完成"
+        echo " -> PM2 $(pm2 -v) installed"
     else
-        echo " -> PM2 $(pm2 -v) 已安装，跳过"
+        echo " -> PM2 $(pm2 -v) already installed, skip"
     fi
 
-    step_ok "Node.js 生态"
+    step_ok "Node.js ecosystem"
 else
-    echo -e "\n>>> Node.js 生态跳过 (ENABLE_NODE=false)"
+    echo -e "\n>>> Node.js ecosystem skipped (ENABLE_NODE=false)"
 fi
 
 # ==========================================
 # 7. 安装 Miniconda (Python 环境管理)
 # ==========================================
 if [[ "$ENABLE_MINICONDA" == "true" ]]; then
-    echo -e "\n>>> 安装 Miniconda..."
+    echo -e "\n>>> Installing Miniconda..."
 
     if [ ! -d "$CONDA_DIR" ]; then
         CONDA_INSTALLER="/tmp/miniconda.sh"
@@ -632,14 +744,14 @@ if [[ "$ENABLE_MINICONDA" == "true" ]]; then
         # 禁止 conda 默认激活 base 环境 (避免干扰系统 python)
         "$CONDA_DIR/bin/conda" config --set auto_activate_base false
 
-        echo " -> Miniconda $(${CONDA_DIR}/bin/conda -V | awk '{print $2}') 安装完成"
+        echo " -> Miniconda $(${CONDA_DIR}/bin/conda -V | awk '{print $2}') installed"
     else
-        echo " -> Miniconda 已存在 ($(${CONDA_DIR}/bin/conda -V 2>/dev/null || echo '未知版本'))，跳过"
+        echo " -> Miniconda already exists ($(${CONDA_DIR}/bin/conda -V 2>/dev/null || echo 'unknown version')), skip"
     fi
 
     step_ok "Miniconda"
 else
-    echo -e "\n>>> Miniconda 跳过 (ENABLE_MINICONDA=false)"
+    echo -e "\n>>> Miniconda skipped (ENABLE_MINICONDA=false)"
 fi
 
 # ==========================================
@@ -662,7 +774,7 @@ ListenStream=[::]:${SSH_PORT}"
         fi
     else
         # 传统模式: 更新 sshd_config.d 为仅目标端口
-        FINAL_SSH_CONFIG="# 服务器安全加固配置 (最终版)
+        FINAL_SSH_CONFIG="# Server hardening (final)
 Port ${SSH_PORT}
 PermitRootLogin yes
 PasswordAuthentication yes
@@ -677,11 +789,11 @@ LoginGraceTime ${LOGIN_GRACE_TIME}"
     fi
 
     if $FINAL_CHANGED; then
-        echo -e "\n>>> 最终切换: 移除 SSH 旧端口 22，仅保留 ${SSH_PORT}..."
+        echo -e "\n>>> Final switch: remove SSH port 22, keep only ${SSH_PORT}..."
         restart_ssh
-        echo " -> SSH 已切换至仅监听 ${SSH_PORT}"
+        echo " -> SSH now listens only on ${SSH_PORT}"
     else
-        echo -e "\n>>> SSH 已是最终配置 (仅监听 ${SSH_PORT})，跳过"
+        echo -e "\n>>> SSH already final config (listen only on ${SSH_PORT}), skip"
     fi
 
     # UFW 中移除旧的 22 端口规则
@@ -694,7 +806,7 @@ LoginGraceTime ${LOGIN_GRACE_TIME}"
         if grep -q "port    = 22,${SSH_PORT}" /etc/fail2ban/jail.local; then
             sed -i "s/port    = 22,${SSH_PORT}/port    = ${SSH_PORT}/" /etc/fail2ban/jail.local
             systemctl restart fail2ban
-            echo " -> Fail2ban 已切换至仅监听 ${SSH_PORT}"
+            echo " -> Fail2ban switched to listen only on ${SSH_PORT}"
         fi
     fi
 fi
@@ -704,22 +816,22 @@ fi
 # ==========================================
 echo ""
 echo "=========================================="
-echo " 🎉 服务器初始化全部完成！"
+echo " Server init completed!"
 echo "=========================================="
-echo " 时区:        $(timedatectl show -p Timezone --value)"
-echo " SSH 端口:    ${SSH_PORT}"
-echo " UFW 防火墙:  $( [[ "$ENABLE_UFW" == "true" ]] && command -v ufw &>/dev/null && ufw status 2>/dev/null | head -1 || echo '未安装/已跳过')"
-echo " Fail2ban:    $( [[ "$ENABLE_FAIL2BAN" == "true" ]] && systemctl is-active fail2ban 2>/dev/null || echo '未安装/已跳过')"
-echo " Docker:      $(docker --version 2>/dev/null | awk '{gsub(/,/,""); print $3}' || echo '未安装/已跳过')"
-echo " Node.js:     $(node -v 2>/dev/null || echo '未安装/已跳过')"
-echo " pnpm:        $(pnpm -v 2>/dev/null || echo '未安装/已跳过')"
-echo " PM2:         $(pm2 -v 2>/dev/null || echo '未安装/已跳过')"
-echo " Conda:       $(${CONDA_DIR}/bin/conda -V 2>/dev/null || echo '未安装/已跳过')"
-echo " 自动更新:    $( [[ "$ENABLE_AUTO_UPDATES" == "true" ]] && systemctl is-active unattended-upgrades 2>/dev/null || echo '未启用/已跳过')"
-echo " 日志:        $LOG_FILE"
+echo " Timezone:     $(timedatectl show -p Timezone --value)"
+echo " SSH port:     ${SSH_PORT}"
+echo " UFW firewall:  $( [[ "$ENABLE_UFW" == "true" ]] && command -v ufw &>/dev/null && ufw status 2>/dev/null | head -1 || echo 'not installed/skipped')"
+echo " Fail2ban:    $( [[ "$ENABLE_FAIL2BAN" == "true" ]] && systemctl is-active fail2ban 2>/dev/null || echo 'not installed/skipped')"
+echo " Docker:      $(docker --version 2>/dev/null | awk '{gsub(/,/,""); print $3}' || echo 'not installed/skipped')"
+echo " Node.js:     $(node -v 2>/dev/null || echo 'not installed/skipped')"
+echo " pnpm:        $(pnpm -v 2>/dev/null || echo 'not installed/skipped')"
+echo " PM2:         $(pm2 -v 2>/dev/null || echo 'not installed/skipped')"
+echo " Conda:       $(${CONDA_DIR}/bin/conda -V 2>/dev/null || echo 'not installed/skipped')"
+echo " Auto updates:  $( [[ "$ENABLE_AUTO_UPDATES" == "true" ]] && systemctl is-active unattended-upgrades 2>/dev/null || echo 'not enabled/skipped')"
+echo " Log:          $LOG_FILE"
 echo "=========================================="
-echo " 👉 执行 'source ~/.bashrc' 或重新连接 SSH 激活环境"
+echo " Tip: run 'source ~/.bashrc' or reconnect SSH to activate env"
 if [[ "$SSH_PORT" != "22" ]]; then
-    echo " ⚠️  SSH 端口已改为 ${SSH_PORT}，请使用: ssh -p ${SSH_PORT} user@host"
+    echo " [WARN] SSH port changed to ${SSH_PORT}, use: ssh -p ${SSH_PORT} user@host"
 fi
 echo "=========================================="

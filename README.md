@@ -24,7 +24,7 @@
 | 可选 | Node.js 生态 | Node.js (默认 v24) + pnpm + PM2 |
 | 可选 | Miniconda | Miniconda3 到 `/opt/miniconda3` |
 
-交互优先级：`whiptail` → `dialog` → 逐项 `y/n`。非交互环境或通过环境变量指定全部选项时，会跳过菜单。
+启动时使用 **whiptail 英文菜单**（↑/↓ 移动，空格勾选，回车确认；主题近似背景 `#262626` / 高亮 `#e95420`）。先展示必装说明，再勾选可选项。安装过程日志同样为英文，避免 PVE 网页控制台中文乱码。无 whiptail 时回退 dialog / y/n。非交互或环境变量指定全部选项时跳过菜单。
 
 ### 使用方法
 
@@ -233,7 +233,7 @@ SKIP_SELECT=true ROOT_PASSWORD=mypass ./ubuntu_server_init.sh
 
 **参数省略与作用说明：**
 以上所有环境变量都是**可选的（可以全部或部分省去）**。当你省略它们时：
-* **交互终端**：弹出复选框（或 y/n）让你选择组件；未指定的项默认勾选。
+* **交互终端**：whiptail 英文说明 + checklist（↑/↓ + 空格）；未指定的项默认勾选。
 * **非交互 / `SKIP_SELECT=true`**：未指定的可选组件默认全部安装。
 * **`ROOT_PASSWORD` (可省去)**：如果省去，脚本会检测 Root 是否有密码；没有则交互输入。
 * **`SSH_PORT` (可省去)**：默认改为 `8022`。
