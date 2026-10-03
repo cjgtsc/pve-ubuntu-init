@@ -156,13 +156,13 @@ The script supports the following three ways to run, and will automatically dete
 | 功能 | PVE 版 (`ubuntu_pve_init.sh`) | 服务器版 (`ubuntu_server_init.sh`) |
 |------|--------------------------|----------------------------------|
 | qemu-guest-agent | ✅ 安装 | ❌ 不需要 |
-| SSH 端口 | 22 (默认) | 8022 (防扫描) |
+| SSH 端口 | 保持 22 (不修改) | 8022 (防扫描，可配置) |
 | UFW 防火墙 | ❌ | ✅ 可选 |
 | Fail2ban | ❌ | ✅ 可选 |
 | 自动安全更新 | ❌ | ✅ 可选 |
-| Root 密码 | 默认 `root` | 交互式设置 (或环境变量指定) |
+| Root 密码 | 自动设为 `root` (免交互) | 交互式设置 / 保留已有密码 |
 | Docker / Node.js / Miniconda | ✅ 可选 | ✅ 可选 |
-| 幂等性 (重复执行) | ✅ | ✅ 已安装的项目自动跳过 |
+| 幂等性 (重复执行) | ✅ 基础环境与软件自动跳过 | ✅ 已安装项目自动跳过，密码不覆盖 |
 
 #### 主要功能
 
@@ -224,8 +224,8 @@ chmod +x ubuntu_server_init.sh
 
 使用示例:
 ```bash
-# 完整参数示例：自定义 SSH 端口 2222、不装 Fail2ban/Miniconda、指定 Node.js v24
-ROOT_PASSWORD=mypass SSH_PORT=2222 ENABLE_FAIL2BAN=false ENABLE_MINICONDA=false NODE_MAJOR=24 ./ubuntu_server_init.sh
+# 完整参数示例（跳过交互菜单）：自定义 SSH 端口 2222、不装 Fail2ban/Miniconda、指定 Node.js v24
+SKIP_SELECT=true ROOT_PASSWORD=mypass SSH_PORT=2222 ENABLE_FAIL2BAN=false ENABLE_MINICONDA=false NODE_MAJOR=24 ./ubuntu_server_init.sh
 
 # 非交互全默认安装（跳过复选框）
 SKIP_SELECT=true ROOT_PASSWORD=mypass ./ubuntu_server_init.sh

@@ -254,6 +254,28 @@ echo "Log file: $LOG_FILE"
 
 # 防止 apt 交互式弹窗 (GRUB、内核升级提示等)
 export DEBIAN_FRONTEND=noninteractive
+# apt 锁等待: unattended-upgrades 等后台进程可能持有锁，等待 60 秒而非立即失败
+echo 'DPkg::Lock::Timeout "60";' > /etc/apt/apt.conf.d/99lock-timeout
+
+# ---- 检测 SSH 运行模式 ----
+# Ubuntu 24.04+ 默认使用 ssh.socket (systemd socket 激活)
+HAS_SSH_SOCKET=false
+if systemctl list-unit-files ssh.socket &>/dev/null 2>&1; then
+    HAS_SSH_SOCKET=true
+fi
+
+# ---- SSH 重启辅助函数 ----
+# 兼容 ssh.socket (Ubuntu 24.04+) 和传统 ssh.service (20.04/22.04) 两种模式
+restart_ssh() {
+    systemctl daemon-reload
+    if $HAS_SSH_SOCKET; then
+        systemctl restart ssh.socket
+    fi
+    # ssh.service 可能是 socket-triggered 而非独立运行，仅在 active 时重启
+    if systemctl is-active ssh.service &>/dev/null; then
+        systemctl restart ssh.service
+    fi
+}
 
 # 动态计算总步骤: 基础 2 步 + 可选组件
 TOTAL_STEPS=2
@@ -292,15 +314,16 @@ timedatectl set-timezone "$TIMEZONE"
 locale-gen en_US.UTF-8 zh_CN.UTF-8 > /dev/null 2>&1 || true
 update-locale LANG=en_US.UTF-8
 
-# 1c. SSH 允许 Root 登录
-SSHD_CONFIG="/etc/ssh/sshd_config"
+# 1c. SSH 允许 Root 登录及密码认证
 SSHD_DROP="/etc/ssh/sshd_config.d/99-root-login.conf"
-# 使用 drop-in 配置，避免直接修改主配置文件 (更干净、更易回滚)
-if ! grep -qs "^PermitRootLogin yes" "$SSHD_DROP" 2>/dev/null; then
-    mkdir -p /etc/ssh/sshd_config.d
-    echo "PermitRootLogin yes" > "$SSHD_DROP"
-    systemctl restart ssh
-    echo " -> Root SSH enabled via drop-in config"
+DESIRED_SSH_CONFIG="PermitRootLogin yes
+PasswordAuthentication yes"
+
+mkdir -p /etc/ssh/sshd_config.d
+if [[ ! -f "$SSHD_DROP" ]] || [[ "$(cat "$SSHD_DROP")" != "$DESIRED_SSH_CONFIG" ]]; then
+    echo "$DESIRED_SSH_CONFIG" > "$SSHD_DROP"
+    restart_ssh
+    echo " -> Root SSH and password login enabled via drop-in config"
 else
     echo " -> Root SSH already configured, skip"
 fi
@@ -447,7 +470,12 @@ if [[ "$ENABLE_MINICONDA" == "true" ]]; then
 
     if [ ! -d "$CONDA_DIR" ]; then
         CONDA_INSTALLER="/tmp/miniconda.sh"
-        wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+        ARCH=$(uname -m)
+        case "$ARCH" in
+            aarch64) CONDA_ARCH="aarch64" ;;
+            *)       CONDA_ARCH="x86_64"  ;;
+        esac
+        wget -q "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${CONDA_ARCH}.sh" \
             -O "$CONDA_INSTALLER"
         bash "$CONDA_INSTALLER" -b -u -p "$CONDA_DIR"
         rm -f "$CONDA_INSTALLER"
